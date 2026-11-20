@@ -1,0 +1,9 @@
+
+streamlit
+scikit-learn
+numpy
+scipy
+pandas
+joblib
+pymupdf
+python-docxv
