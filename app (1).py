@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import unicodedata
 import zipfile
 from pathlib import Path
@@ -15,6 +16,7 @@ import fitz  # PyMuPDF
 import joblib
 import numpy as np
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 from docx import Document
 
@@ -26,6 +28,7 @@ APP_DIR = Path(__file__).resolve().parent
 MODEL_PATH = APP_DIR / "best_resume_classifier.pkl"
 ENCODER_PATH = APP_DIR / "label_encoder.pkl"
 BACKGROUND_PATH = APP_DIR / "resume_background.png"
+PIKACHU_PATH = APP_DIR / "pikachu_processing.webp"
 REVIEW_THRESHOLD = 0.70
 MIN_WORD_COUNT = 80
 
@@ -44,6 +47,13 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+if "sidebar_open" not in st.session_state:
+    st.session_state.sidebar_open = True
+if "nav_section" not in st.session_state:
+    st.session_state.nav_section = "Resume Classification - Prediction"
+if st.session_state.nav_section not in {"Resume Classification - Prediction", "About the Model"}:
+    st.session_state.nav_section = "Resume Classification - Prediction"
 
 
 # =============================================================================
@@ -91,12 +101,45 @@ def build_dashboard_css() -> str:
         '[data-testid="stDataFrame"] {background:rgba(4,18,46,.86); border:1px solid rgba(111,197,255,.3); border-radius:14px;}',
         "hr {border-color:rgba(141,205,255,.25) !important;}",
         "h1,h2,h3,p,label,.stMarkdown {text-shadow:0 1px 9px rgba(0,0,0,.16);}",
+        '[data-testid="stSidebarCollapseButton"], [data-testid="collapsedControl"] {display:none !important;}',
+        "" if st.session_state.sidebar_open else '[data-testid="stSidebar"] {display:none !important;} [data-testid="stMain"] {margin-left:0 !important; width:100% !important;}',
+        ".pika-shell {position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:195px;margin:.6rem auto 1rem auto;padding:1rem;border-radius:22px;background:radial-gradient(circle at 50% 45%,rgba(27,166,255,.20),rgba(4,15,41,.78) 68%);border:1px solid rgba(111,220,255,.36);overflow:hidden;}",
+        ".pika-shell img {width:min(300px,80vw);max-height:175px;object-fit:contain;position:relative;z-index:2;border-radius:16px;}",
+        ".pika-working img {animation:pikaCharge 1s ease-in-out infinite;filter:drop-shadow(0 0 12px rgba(40,200,255,.9));}",
+        ".pika-complete img {animation:pikaBlast 1.45s cubic-bezier(.16,.88,.28,1) both;filter:drop-shadow(0 0 24px #ffe45e);}",
+        ".pika-caption {position:relative;z-index:3;color:#e7f7ff;font-weight:850;letter-spacing:.04em;margin-top:.45rem;text-align:center;}",
+        ".pika-bolt {position:absolute;color:#ffe45e;font-size:2.5rem;opacity:.8;animation:boltFlash .55s ease-in-out infinite alternate;}",
+        ".pika-bolt.left {left:12%;top:18%;}.pika-bolt.right {right:12%;bottom:18%;animation-delay:.22s;}",
+        ".pika-complete:after {content:'';position:absolute;inset:12%;border:3px solid rgba(255,232,95,.85);border-radius:50%;animation:burstRing 1.15s ease-out both;}",
+        "@keyframes pikaCharge {0%,100%{transform:translateY(2px) scale(.96) rotate(-1deg)}50%{transform:translateY(-8px) scale(1.04) rotate(1deg)}}",
+        "@keyframes pikaBlast {0%{transform:scale(.48);opacity:.25}55%{transform:scale(1.22);opacity:1}78%{transform:scale(.96)}100%{transform:scale(1.05);opacity:1}}",
+        "@keyframes burstRing {0%{transform:scale(.2);opacity:1}100%{transform:scale(1.7);opacity:0}}",
+        "@keyframes boltFlash {from{opacity:.25;transform:scale(.75) rotate(-8deg)}to{opacity:1;transform:scale(1.18) rotate(8deg)}}",
         "</style>",
     ]
     return "\n".join(css_lines)
 
 
 st.markdown(build_dashboard_css(), unsafe_allow_html=True)
+
+
+def pikachu_animation_html(state: str) -> str:
+    """Show the supplied Pikachu image with a CSS processing / completion effect."""
+    if not PIKACHU_PATH.exists():
+        return "<div class='glass-card'>⚡ Classification in progress...</div>"
+    image_data = base64.b64encode(PIKACHU_PATH.read_bytes()).decode("ascii")
+    if state == "complete":
+        wrapper_class = "pika-shell pika-complete"
+        caption = "⚡ CLASSIFICATION COMPLETE! ⚡"
+    else:
+        wrapper_class = "pika-shell pika-working"
+        caption = "⚡ PIKACHU IS ANALYZING RESUMES... ⚡"
+    return (
+        f"<div class='{wrapper_class}'>"
+        "<span class='pika-bolt left'>ϟ</span><span class='pika-bolt right'>ϟ</span>"
+        f"<img src='data:image/webp;base64,{image_data}' alt='Pikachu classification assistant'>"
+        f"<div class='pika-caption'>{caption}</div></div>"
+    )
 
 
 # =============================================================================
@@ -390,47 +433,37 @@ if "classification_results" not in st.session_state:
     st.session_state.classification_results = []
 if "last_run_time" not in st.session_state:
     st.session_state.last_run_time = None
-if "nav_section" not in st.session_state:
-    st.session_state.nav_section = "Resume Classification"
 
-
-# =============================================================================
-# SIDEBAR NAVIGATION — OPEN BY DEFAULT; BRAND BUTTON RETURNS TO MAIN SCREEN
-# =============================================================================
-with st.sidebar:
-    if st.button("📄  RESUME CLASSIFIER", key="brand_home_button", use_container_width=True):
-        st.session_state.nav_section = "Resume Classification"
-
+# The branded Resume Classifier button is the single custom navigation toggle.
+# Native Streamlit >> / << controls remain hidden.
+brand_left, brand_right = st.columns([2.2, 5])
+with brand_left:
+    if st.button("📄  Resume Classifier", key="resume_classifier_sidebar_toggle", use_container_width=True):
+        st.session_state.sidebar_open = not st.session_state.sidebar_open
+        st.rerun()
+with brand_right:
     st.markdown(
-        '<div class="brand-card"><div class="brand-title">Resume Classifier</div>'
-        '<div class="brand-subtitle">Intelligent resume sorting workspace</div></div>',
+        '<div class="hero-kicker" style="padding:.8rem 0">AI-POWERED RESUME ANALYSIS</div>',
         unsafe_allow_html=True,
     )
-    st.markdown("### Workspace")
-    selected_section = st.radio(
-        "Dashboard navigation",
-        ["Resume Classification", "Prediction Results", "About the Model"],
-        key="nav_section",
-        label_visibility="collapsed",
-    )
-    st.divider()
-    st.markdown("**AI CLASSIFICATION ENGINE**")
-    st.markdown("<span style='color:#83e8ff'>●</span> Logistic Regression + TF-IDF", unsafe_allow_html=True)
-    st.markdown("**DOCUMENT FORMATS**")
-    st.caption("PDF · DOCX · DOC · TXT · CSV · XLSX · XLS")
-    st.markdown("**MODEL CLASSES**")
-    st.caption(f"{len(available_categories)} learned categories")
-    st.divider()
-    st.caption("Document intelligence · Resume organization")
 
+selected_section = st.session_state.nav_section
+if st.session_state.sidebar_open:
+    with st.sidebar:
+        st.markdown("<div class='hero-kicker'>WORKSPACE</div>", unsafe_allow_html=True)
+        selected_section = st.radio(
+            "Dashboard navigation",
+            ["Resume Classification - Prediction", "About the Model"],
+            key="nav_section",
+            label_visibility="collapsed",
+        )
 
 # =============================================================================
 # MAIN SCREEN — UPLOAD, CLASSIFY, VIEW AND DOWNLOAD IN ONE PLACE
 # =============================================================================
-if selected_section == "Resume Classification":
-    st.markdown('<div class="hero-kicker">INTELLIGENT DOCUMENT WORKSPACE</div>', unsafe_allow_html=True)
-    st.markdown('<div class="hero-title">📄 Resume Classifier</div>', unsafe_allow_html=True)
-    st.markdown('<div class="hero-subtitle">Resume analysis and category sorting</div>', unsafe_allow_html=True)
+if selected_section == "Resume Classification - Prediction":
+    st.markdown('<div class="hero-title">Resume Classification &amp; Prediction</div>', unsafe_allow_html=True)
+    st.markdown('<div class="hero-subtitle">Upload resumes, run classification and download the results from this screen.</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="glass-card"><div class="section-title">Upload resume files or a resume dataset</div><div class="muted-copy">Select individual resumes, or a CSV / Excel table where each row contains one resume in a text column.</div></div>', unsafe_allow_html=True)
 
@@ -501,6 +534,9 @@ if selected_section == "Resume Classification":
                 total_records += 1
         total_records = max(total_records, 1)
 
+        anime_area = st.empty()
+        anime_started = time.monotonic()
+        anime_area.markdown(pikachu_animation_html("working"), unsafe_allow_html=True)
         progress = st.progress(0, text="Preparing classification...")
         status_area = st.empty()
         completed = 0
@@ -553,9 +589,19 @@ if selected_section == "Resume Classification":
         status_area.empty()
         progress.empty()
 
+        # Keep the uploaded Pikachu visible during very fast single-resume predictions.
+        remaining_animation = 1.2 - (time.monotonic() - anime_started)
+        if remaining_animation > 0:
+            time.sleep(remaining_animation)
+
         if new_results:
+            anime_area.markdown(pikachu_animation_html("complete"), unsafe_allow_html=True)
+            # Let the completion burst finish before the results/download area is rendered.
+            time.sleep(1.5)
             st.success(f"Classification completed: {len(new_results)} resume record(s) processed.")
             st.balloons()
+        else:
+            anime_area.empty()
         if errors:
             with st.expander(f"Items needing attention ({len(errors)})", expanded=True):
                 for filename, message in errors:
@@ -612,101 +658,100 @@ if selected_section == "Resume Classification":
                 key="download_classification_report_main",
             )
 
-
-# =============================================================================
-# SECTION 2 — PREDICTION RESULTS
-# =============================================================================
-elif selected_section == "Prediction Results":
-    st.markdown('<div class="hero-kicker">CLASSIFICATION OVERVIEW</div>', unsafe_allow_html=True)
-    st.markdown('<div class="hero-title">Prediction Results</div>', unsafe_allow_html=True)
-    results = st.session_state.classification_results
-
-    if not results:
-        st.info("Your classification results will appear here after you analyze resumes on the main screen.")
-    else:
-        summary_df = build_results_dataframe(results)
-        total_records = len(results)
-        review_count = sum(item["top_probability"] < REVIEW_THRESHOLD for item in results)
-        average_score = float(np.mean([item["top_probability"] for item in results]))
-        metric1, metric2, metric3 = st.columns(3)
-        metric1.metric("Classified records", total_records)
-        metric2.metric("Review recommended", review_count)
-        metric3.metric("Average model score", f"{average_score:.1%}")
-        if st.session_state.last_run_time:
-            st.caption(f"Latest run: {st.session_state.last_run_time}")
-        display_df = summary_df.copy()
-        display_df["Top class probability"] = display_df["Top class probability"].map(lambda score: f"{score:.1%}")
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
-        st.markdown("### Download center")
-        col_zip, col_csv = st.columns(2)
-        with col_zip:
-            st.download_button(
-                "📦 Download category-organized ZIP",
-                data=make_classified_zip(results),
-                file_name="classified_resumes_by_category.zip",
-                mime="application/zip",
-                type="primary",
-                use_container_width=True,
-                key="download_results_zip",
+        st.markdown("### Resume classification analytics")
+        category_counts = (
+            summary_df["Predicted category"]
+            .value_counts()
+            .rename_axis("Category")
+            .reset_index(name="Resumes")
+        )
+        chart_left, chart_right = st.columns(2)
+        with chart_left:
+            st.markdown("**Category-wise resume count**")
+            bar_figure = px.bar(
+                category_counts,
+                x="Category",
+                y="Resumes",
+                color="Category",
+                text="Resumes",
+                color_discrete_sequence=["#19C6F5", "#6574F7", "#35D0A0", "#F6B84B", "#BE8CFF"],
             )
-        with col_csv:
-            st.download_button(
-                "📊 Download result report",
-                data=summary_df.to_csv(index=False).encode("utf-8-sig"),
-                file_name="resume_classification_report.csv",
-                mime="text/csv",
-                use_container_width=True,
-                key="download_results_report",
+            bar_figure.update_layout(
+                template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)", showlegend=False,
+                margin=dict(l=10, r=10, t=20, b=10),
+                yaxis_title="Number of resumes", xaxis_title="Predicted category",
             )
-        distribution = summary_df["Predicted category"].value_counts().rename_axis("Category").to_frame("Documents")
-        st.markdown("### Category distribution")
-        st.bar_chart(distribution)
-        if st.button("Clear results", key="clear_classification_results"):
-            st.session_state.classification_results = []
-            st.session_state.last_run_time = None
-            st.rerun()
+            st.plotly_chart(bar_figure, use_container_width=True)
+        with chart_right:
+            st.markdown("**Share of classified resumes**")
+            pie_figure = px.pie(
+                category_counts, names="Category", values="Resumes", hole=0.48,
+                color_discrete_sequence=["#19C6F5", "#6574F7", "#35D0A0", "#F6B84B", "#BE8CFF"],
+            )
+            pie_figure.update_layout(
+                template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=10, r=10, t=20, b=10),
+                legend_title_text="Category",
+            )
+            pie_figure.update_traces(textposition="inside", textinfo="percent+label")
+            st.plotly_chart(pie_figure, use_container_width=True)
 
 
 # =============================================================================
-# SECTION 3 — ABOUT THE MODEL
+# SECTION 2 — ABOUT THE MODEL
 # =============================================================================
 elif selected_section == "About the Model":
-    st.markdown('<div class="hero-kicker">MODEL INFORMATION</div>', unsafe_allow_html=True)
+    st.markdown('<div class="hero-kicker">MODEL OVERVIEW</div>', unsafe_allow_html=True)
     st.markdown('<div class="hero-title">About the Model</div>', unsafe_allow_html=True)
-    st.markdown('<div class="hero-subtitle">Text processing and machine-learning configuration</div>', unsafe_allow_html=True)
-
-    info1, info2, info3 = st.columns(3)
-    info1.metric("Algorithm", "Logistic Regression")
-    info2.metric("Text representation", "TF-IDF")
-    info3.metric("Learned categories", len(available_categories))
-
-    st.markdown("### Classification pipeline")
-    st.code(
-        "Resume / spreadsheet row\n"
-        "      ↓\n"
-        "Text extraction or text-column selection\n"
-        "      ↓\n"
-        "Unicode normalization and contact-detail masking\n"
-        "      ↓\n"
-        "Saved TF-IDF vectorizer\n"
-        "      ↓\n"
-        "Logistic Regression classifier\n"
-        "      ↓\n"
-        "Predicted category and downloadable output",
-        language="text",
+    st.markdown(
+        '<div class="hero-subtitle">How resume text is transformed into a category suggestion.</div>',
+        unsafe_allow_html=True,
     )
 
-    st.markdown("### Model configuration")
-    st.json({"C": 0.1, "class_weight": "balanced", "solver": "lbfgs", "max_iter": 3000, "selection_metric": "Macro F1"})
+    overview1, overview2, overview3 = st.columns(3)
+    overview1.metric("Algorithm", "Logistic Regression")
+    overview2.metric("Text representation", "TF-IDF")
+    overview3.metric("Learned categories", len(available_categories))
 
-    st.markdown("### Recorded evaluation")
+    st.markdown("### How the classifier works")
+    info_cols = st.columns(3)
+    with info_cols[0]:
+        st.markdown(
+            '<div class="glass-card"><div class="section-title">01 · Text preparation</div>'
+            '<div class="muted-copy">Resume text is extracted from supported files, normalized, and contact details are masked before feature extraction.</div></div>',
+            unsafe_allow_html=True,
+        )
+    with info_cols[1]:
+        st.markdown(
+            '<div class="glass-card"><div class="section-title">02 · TF-IDF features</div>'
+            '<div class="muted-copy">Words and two-word phrases are converted into weighted numerical features that represent the document content.</div></div>',
+            unsafe_allow_html=True,
+        )
+    with info_cols[2]:
+        st.markdown(
+            '<div class="glass-card"><div class="section-title">03 · Category prediction</div>'
+            '<div class="muted-copy">Logistic Regression compares the feature pattern with learned classes and returns a suggested category with class-probability estimates.</div></div>',
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("### Why Logistic Regression?")
+    st.write(
+        "Logistic Regression is a supervised classification algorithm suited to sparse, high-dimensional TF-IDF text features. "
+        "It learns a decision boundary between the labelled resume categories and produces class-probability estimates "
+        "that can be displayed for review."
+    )
+
+    st.markdown("### Model evaluation")
     eval1, eval2, eval3 = st.columns(3)
-    eval1.metric("5-fold CV Macro F1", "98.57%")
+    eval1.metric("5-fold cross-validation Macro F1", "98.57%")
     eval2.metric("Holdout test Macro F1", "100%")
     eval3.metric("Holdout test accuracy", "100%")
-    st.caption("The holdout test set contained 16 documents; scores are not a guarantee of performance on all future resumes.")
+    st.caption(
+        "The holdout test contained 16 resumes. These project results are encouraging, but the small test set does not guarantee performance on all future resumes."
+    )
 
-    st.markdown("### Categories learned by this model")
+    st.markdown("### Categories learned during training")
     category_columns = st.columns(2)
     for category_index, category in enumerate(available_categories):
         with category_columns[category_index % 2]:
@@ -716,16 +761,16 @@ elif selected_section == "About the Model":
                 unsafe_allow_html=True,
             )
 
-    st.warning(
-        "The current saved model can assign resumes only to the categories represented in its training data. "
-        "It can accept resumes for many professions and read multiple file formats, but it cannot learn a new "
-        "profession label without labelled examples and retraining. Treat predictions as suggestions and check "
-        "unfamiliar resumes manually."
+    st.markdown("### Model behavior and scope")
+    st.write(
+        "The classifier returns the closest category among the labels it learned during training. "
+        "It can process resumes for different job roles, but it cannot create a new job-category label by itself. "
+        "To recognize additional roles, add representative labelled resumes for each new category and retrain the model."
     )
-    st.markdown("### Supported input formats")
-    st.write("PDF, DOCX, DOC, TXT, CSV, XLSX and XLS. For CSV / Excel, choose the column containing resume text; each row is treated as one resume.")
-    st.markdown("### Responsible use")
-    st.write("Use the output for document organization and routing support. Do not use this classifier to rank candidates or make automated hiring or rejection decisions. Image-only scanned PDFs require OCR before text extraction.")
+    st.write(
+        "Use the prediction to support resume organization and document routing. Review unfamiliar or low-confidence "
+        "predictions manually, and do not use the classifier to rank candidates or make automated hiring decisions."
+    )
 
 
 # =============================================================================
@@ -733,7 +778,7 @@ elif selected_section == "About the Model":
 # =============================================================================
 st.markdown(
     "<div style='text-align:center;color:#c5dcf5;font-size:.85rem;padding:1rem 0 .2rem'>"
-    "📄 Resume Classifier · Intelligent document organization"
+    "📄 Resume Classifier · Resume analysis and category insights"
     "</div>",
     unsafe_allow_html=True,
 )
