@@ -20,7 +20,7 @@ from docx import Document
 
 
 # =============================================================================
-# APP SETTINGS
+# APPLICATION SETTINGS
 # =============================================================================
 APP_DIR = Path(__file__).resolve().parent
 MODEL_PATH = APP_DIR / "best_resume_classifier.pkl"
@@ -28,6 +28,15 @@ ENCODER_PATH = APP_DIR / "label_encoder.pkl"
 BACKGROUND_PATH = APP_DIR / "resume_background.png"
 REVIEW_THRESHOLD = 0.70
 MIN_WORD_COUNT = 80
+
+SUPPORTED_UPLOADS = ["pdf", "docx", "doc", "txt", "csv", "xlsx", "xls"]
+DOCUMENT_MIME_TYPES = {
+    "pdf": "application/pdf",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "doc": "application/msword",
+    "txt": "text/plain",
+    "csv": "text/csv",
+}
 
 st.set_page_config(
     page_title="Resume Classifier",
@@ -38,78 +47,60 @@ st.set_page_config(
 
 
 # =============================================================================
-# BACKGROUND + DASHBOARD STYLING
-# Keep resume_background.png in the same GitHub folder as app.py.
+# DASHBOARD BACKGROUND AND VISUAL STYLE
 # =============================================================================
-def load_background_css() -> str:
+def build_dashboard_css() -> str:
     if BACKGROUND_PATH.exists():
-        encoded = base64.b64encode(BACKGROUND_PATH.read_bytes()).decode("ascii")
-        background_layer = (
-            "linear-gradient(105deg, rgba(2, 9, 30, .88), "
-            "rgba(3, 15, 45, .82)), "
-            f"url('data:image/png;base64,{encoded}')"
+        encoded_bg = base64.b64encode(BACKGROUND_PATH.read_bytes()).decode("ascii")
+        background_css = (
+            "background-image: linear-gradient(110deg, rgba(3,12,34,.88), "
+            "rgba(5,20,51,.78)), "
+            f"url('data:image/png;base64,{encoded_bg}');"
         )
-        return f"background-image: {background_layer};"
+    else:
+        background_css = "background: linear-gradient(135deg,#06132f,#102c62 55%,#07142f);"
 
-    # Gradient fallback if the image has not yet been uploaded to GitHub.
-    return "background: linear-gradient(135deg, #06132f 0%, #102c62 55%, #07142f 100%);"
+    css_lines = [
+        "<style>",
+        ".stApp { " + background_css + " background-size: cover; background-position: center; background-attachment: fixed; background-repeat: no-repeat; }",
+        '[data-testid="stAppViewContainer"], [data-testid="stMain"], .main {background:transparent !important;}',
+        ".block-container {max-width:1500px; padding-top:1.35rem; padding-bottom:3rem;}",
+        '[data-testid="stSidebar"] > div:first-child {background:linear-gradient(180deg,rgba(3,13,39,.99),rgba(8,33,77,.97)); border-right:1px solid rgba(90,205,255,.36);}',
+        '[data-testid="stSidebar"] {color:#f5f9ff;}',
+        '[data-testid="stSidebar"] [data-testid="stRadio"] label {color:#e8f5ff !important; font-weight:700; padding:.35rem .45rem; border-radius:10px;}',
+        '[data-testid="stSidebar"] [data-testid="stRadio"] label:hover {background:rgba(36,166,255,.15); color:#74e6ff !important;}',
+        '[data-testid="stSidebar"] [data-testid="stRadio"] div[role="radio"] {accent-color:#17c8ff;}',
+        '[data-testid="collapsedControl"], [data-testid="stSidebarCollapseButton"] {display:none !important;}',
+        ".brand-card {padding:1.05rem .95rem; border-radius:18px; background:linear-gradient(135deg,rgba(0,174,255,.25),rgba(100,77,255,.24)); border:1px solid rgba(104,207,255,.48); margin-bottom:.8rem; box-shadow:0 9px 30px rgba(0,0,0,.23);}",
+        ".brand-title {font-size:1.55rem; line-height:1.2; font-weight:900; color:#fff; letter-spacing:.2px; text-shadow:0 2px 18px rgba(58,192,255,.35);}",
+        ".brand-subtitle {color:#b9eaff; font-size:.82rem; margin-top:.35rem;}",
+        ".hero-kicker {color:#7ee8ff; font-size:.76rem; font-weight:850; letter-spacing:.17em; text-transform:uppercase;}",
+        ".hero-title {color:#fff; font-size:clamp(2.5rem,5vw,4rem); line-height:1.05; font-weight:950; margin:.25rem 0 .85rem 0; text-shadow:0 3px 26px rgba(0,0,0,.42);}",
+        ".hero-subtitle {color:#d9edff; font-size:1rem; margin-bottom:1rem;}",
+        ".glass-card {background:rgba(5,20,52,.82); border:1px solid rgba(110,203,255,.34); border-radius:20px; padding:1.15rem 1.25rem; box-shadow:0 14px 40px rgba(0,0,0,.24); backdrop-filter:blur(10px); margin-bottom:.9rem;}",
+        ".section-title {color:#fff; font-weight:850; font-size:1.2rem;}",
+        ".muted-copy {color:#c9ddf4;}",
+        'div[data-testid="stMetric"] {background:rgba(5,22,56,.84); border:1px solid rgba(90,194,255,.36); padding:.8rem 1rem; border-radius:15px; box-shadow:0 8px 25px rgba(0,0,0,.14);}',
+        'div[data-testid="stMetric"] label {color:#b9d8f8 !important;}',
+        'div[data-testid="stMetric"] [data-testid="stMetricValue"] {color:#fff !important;}',
+        ".stButton > button, .stDownloadButton > button {border:0 !important; border-radius:13px !important; color:#fff !important; font-weight:850 !important; background:linear-gradient(100deg,#0878e8,#635bfa) !important; box-shadow:0 7px 22px rgba(15,116,237,.28); min-height:2.8rem;}",
+        ".stButton > button:hover, .stDownloadButton > button:hover {border:1px solid #8beaff !important; filter:brightness(1.12);}",
+        '[data-testid="stFileUploader"] section {background:rgba(6,25,60,.83); border:1.5px dashed rgba(94,207,255,.75); border-radius:17px;}',
+        '[data-testid="stFileUploader"] label, [data-testid="stFileUploader"] small {color:#e9f7ff !important;}',
+        ".stProgress > div > div > div > div {background:linear-gradient(90deg,#04c7ff,#7867ff);}",
+        '[data-testid="stDataFrame"] {background:rgba(4,18,46,.86); border:1px solid rgba(111,197,255,.3); border-radius:14px;}',
+        "hr {border-color:rgba(141,205,255,.25) !important;}",
+        "h1,h2,h3,p,label,.stMarkdown {text-shadow:0 1px 9px rgba(0,0,0,.16);}",
+        "</style>",
+    ]
+    return "\n".join(css_lines)
 
 
-background_css = load_background_css()
-# Use a normal triple-quoted template (not an f-string) so CSS braces cannot
-# accidentally be interpreted as Python f-string expressions.
-# Build CSS as a list of ordinary strings. This avoids multiline quote blocks,
-# which can become unterminated if only part of the file is pasted into GitHub.
-DASHBOARD_CSS = "\n".join([
-    "<style>",
-    ".stApp {",
-    "    __RESUME_BACKGROUND__",
-    "    background-size: cover;",
-    "    background-position: center center;",
-    "    background-attachment: fixed;",
-    "    background-repeat: no-repeat;",
-    "}",
-    '[data-testid="stAppViewContainer"],',
-    '[data-testid="stMain"],',
-    ".main { background: transparent !important; }",
-    ".block-container { max-width: 1450px; padding-top: 1.5rem; padding-bottom: 3rem; }",
-    '[data-testid="stSidebar"] > div:first-child {',
-    "    background: linear-gradient(180deg, rgba(4, 15, 43, .98), rgba(7, 31, 70, .96));",
-    "    border-right: 1px solid rgba(72, 190, 255, .35);",
-    "}",
-    '[data-testid="stSidebar"] { color: #f4f8ff; }',
-    '[data-testid="stSidebar"] [data-testid="stRadio"] label { color: #e6f3ff !important; font-weight: 650; }',
-    '[data-testid="stSidebar"] [data-testid="stRadio"] label:hover { color: #62ddff !important; }',
-    ".brand-card { padding: 1.1rem .9rem; border-radius: 18px; background: linear-gradient(135deg, rgba(0,174,255,.22), rgba(95,86,255,.22)); border: 1px solid rgba(104,207,255,.45); margin-bottom: 1rem; box-shadow: 0 8px 28px rgba(0,0,0,.20); }",
-    ".brand-title { font-size: 1.45rem; font-weight: 850; color: #ffffff; letter-spacing: .2px; }",
-    ".brand-subtitle { color: #b9eaff; font-size: .82rem; margin-top: .25rem; }",
-    ".hero-kicker { color: #7ee8ff; font-size: .78rem; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; }",
-    ".hero-title { color: #ffffff; font-size: clamp(2.2rem, 4vw, 3.35rem); line-height: 1.08; font-weight: 900; margin: .25rem 0 .55rem 0; text-shadow: 0 3px 24px rgba(0,0,0,.32); }",
-    ".hero-copy { color: #d3eaff; font-size: 1.02rem; max-width: 850px; }",
-    ".glass-card { background: rgba(5,20,52,.78); border: 1px solid rgba(110,203,255,.30); border-radius: 19px; padding: 1.15rem 1.25rem; box-shadow: 0 12px 36px rgba(0,0,0,.20); backdrop-filter: blur(9px); margin-bottom: .9rem; }",
-    ".section-title { color: #ffffff; font-weight: 800; font-size: 1.22rem; }",
-    ".muted-copy { color: #c4d9f0; }",
-    'div[data-testid="stMetric"] { background: rgba(5,22,56,.80); border: 1px solid rgba(90,194,255,.32); padding: .8rem 1rem; border-radius: 15px; box-shadow: 0 8px 25px rgba(0,0,0,.12); }',
-    'div[data-testid="stMetric"] label { color: #b9d8f8 !important; }',
-    'div[data-testid="stMetric"] [data-testid="stMetricValue"] { color: #ffffff !important; }',
-    ".stButton > button, .stDownloadButton > button { border: 0 !important; border-radius: 12px !important; color: #ffffff !important; font-weight: 800 !important; background: linear-gradient(100deg, #0878e8, #635bfa) !important; box-shadow: 0 7px 22px rgba(15,116,237,.25); min-height: 2.8rem; }",
-    ".stButton > button:hover, .stDownloadButton > button:hover { border: 1px solid #8beaff !important; filter: brightness(1.12); }",
-    '[data-testid="stFileUploader"] section { background: rgba(6,25,60,.78); border: 1.5px dashed rgba(94,207,255,.68); border-radius: 16px; }',
-    '[data-testid="stFileUploader"] label, [data-testid="stFileUploader"] small { color: #e5f5ff !important; }',
-    ".stProgress > div > div > div > div { background: linear-gradient(90deg, #04c7ff, #7867ff); }",
-    '[data-testid="stDataFrame"] { background: rgba(4,18,46,.82); border: 1px solid rgba(111,197,255,.25); border-radius: 14px; }',
-    "hr { border-color: rgba(141,205,255,.25) !important; }",
-    "h1, h2, h3, p, label, .stMarkdown { text-shadow: 0 1px 9px rgba(0,0,0,.12); }",
-    "</style>",
-])
-st.markdown(
-    DASHBOARD_CSS.replace("__RESUME_BACKGROUND__", background_css),
-    unsafe_allow_html=True,
-)
+st.markdown(build_dashboard_css(), unsafe_allow_html=True)
 
 
 # =============================================================================
-# PREPROCESSING — must match the preprocessing used before TF-IDF in training
+# TEXT PREPROCESSING — keep identical to the training preprocessing
 # =============================================================================
 def clean_resume_text(text: str) -> str:
     text = unicodedata.normalize("NFKC", str(text)).lower()
@@ -136,30 +127,23 @@ def clean_resume_text(text: str) -> str:
 def extract_docx(file_bytes: bytes) -> str:
     document = Document(io.BytesIO(file_bytes))
     chunks = [paragraph.text for paragraph in document.paragraphs]
-
     for table in document.tables:
         for row in table.rows:
             chunks.append(" | ".join(cell.text for cell in row.cells))
-
     for section in document.sections:
         chunks.extend(paragraph.text for paragraph in section.header.paragraphs)
         chunks.extend(paragraph.text for paragraph in section.footer.paragraphs)
-
     return "\n".join(chunks)
 
 
 def extract_doc(file_bytes: bytes) -> str:
     if not shutil.which("antiword"):
-        raise RuntimeError(
-            "The .doc reader is unavailable. Keep packages.txt with 'antiword' in the repository."
-        )
-
+        raise RuntimeError("The .doc reader is unavailable. Keep packages.txt with 'antiword' in the repository.")
     temp_path = None
     try:
         with tempfile.NamedTemporaryFile(suffix=".doc", delete=False) as temp_file:
             temp_file.write(file_bytes)
             temp_path = temp_file.name
-
         result = subprocess.run(
             ["antiword", temp_path],
             capture_output=True,
@@ -188,11 +172,68 @@ def extract_document_text(filename: str, file_bytes: bytes) -> str:
         return extract_doc(file_bytes)
     if suffix == ".txt":
         return file_bytes.decode("utf-8", errors="replace")
-    raise ValueError("Unsupported file type. Upload PDF, DOCX, DOC, or TXT.")
+    raise ValueError("Unsupported document type.")
 
 
 # =============================================================================
-# LOAD SAVED MODEL + LABEL ENCODER
+# CSV / EXCEL INPUT
+# A row is treated as one resume; the selected text column must contain resume text.
+# =============================================================================
+def read_tabular_file(filename: str, file_bytes: bytes) -> pd.DataFrame:
+    suffix = Path(filename).suffix.lower()
+    buffer = io.BytesIO(file_bytes)
+    if suffix == ".csv":
+        last_error = None
+        for encoding in ("utf-8-sig", "cp1252", "latin-1"):
+            try:
+                buffer.seek(0)
+                return pd.read_csv(buffer, encoding=encoding, sep=None, engine="python")
+            except Exception as exc:
+                last_error = exc
+        raise ValueError(f"Could not read the CSV file: {last_error}")
+    if suffix in {".xlsx", ".xls"}:
+        # The first worksheet is used. Each non-empty row represents one resume.
+        return pd.read_excel(buffer, sheet_name=0)
+    raise ValueError("This is not a CSV or Excel file.")
+
+
+def suggest_text_column(dataframe: pd.DataFrame) -> str:
+    if dataframe.empty or len(dataframe.columns) == 0:
+        raise ValueError("The spreadsheet does not contain any data columns.")
+    normalized = {
+        re.sub(r"[^a-z0-9]", "", str(column).lower()): column
+        for column in dataframe.columns
+    }
+    preferred_names = [
+        "resumetext", "cvtext", "rawtext", "resume", "resumes", "cv",
+        "content", "text", "description", "profile", "details",
+    ]
+    for name in preferred_names:
+        if name in normalized:
+            return normalized[name]
+
+    # Otherwise choose the text-like column with the largest average text length.
+    text_columns = [
+        column for column in dataframe.columns
+        if pd.api.types.is_object_dtype(dataframe[column])
+        or pd.api.types.is_string_dtype(dataframe[column])
+    ]
+    if not text_columns:
+        raise ValueError("No text column was found. Add a column containing the resume text.")
+    return max(
+        text_columns,
+        key=lambda column: dataframe[column].fillna("").astype(str).str.len().mean(),
+    )
+
+
+def cell_to_text(value: Any) -> str:
+    if value is None or (not isinstance(value, (list, dict)) and pd.isna(value)):
+        return ""
+    return str(value)
+
+
+# =============================================================================
+# MODEL LOADING AND PREDICTION
 # =============================================================================
 @st.cache_resource(show_spinner="Loading the trained resume classifier...")
 def load_artifacts():
@@ -202,15 +243,12 @@ def load_artifacts():
             "Missing file(s): " + ", ".join(missing)
             + ". Add both model files beside app.py in GitHub."
         )
-
     model = joblib.load(MODEL_PATH)
     label_encoder = joblib.load(ENCODER_PATH)
-
     if not hasattr(model, "predict") or not hasattr(model, "predict_proba"):
         raise TypeError("The saved Pipeline must support predict() and predict_proba().")
     if not hasattr(label_encoder, "inverse_transform"):
         raise TypeError("label_encoder.pkl is not a fitted LabelEncoder-compatible object.")
-
     return model, label_encoder
 
 
@@ -223,19 +261,27 @@ def get_class_names(model: Any, label_encoder: Any) -> list[str]:
     return [str(label) for label in decoded]
 
 
-def classify_document(filename: str, file_bytes: bytes, model: Any, label_encoder: Any) -> dict:
-    raw_text = extract_document_text(filename, file_bytes)
+def classify_text_record(
+    record_name: str,
+    raw_text: str,
+    model: Any,
+    label_encoder: Any,
+    *,
+    source_kind: str,
+    original_bytes: bytes | None = None,
+    source_file: str | None = None,
+    source_row: dict[str, Any] | None = None,
+    row_number: int | None = None,
+) -> dict:
     cleaned_text = clean_resume_text(raw_text)
     word_count = len(cleaned_text.split())
-
     if not cleaned_text or word_count < MIN_WORD_COUNT:
         raise ValueError(
-            f"Only {word_count} usable words were extracted. The file may be scanned, empty, or too short."
+            f"Only {word_count} usable words were found. Check that the selected column contains full resume text."
         )
 
     predicted_encoded = int(np.asarray(model.predict([cleaned_text])).reshape(-1)[0])
     predicted_category = str(label_encoder.inverse_transform([predicted_encoded])[0])
-
     probabilities = np.asarray(model.predict_proba([cleaned_text]))[0]
     class_names = get_class_names(model, label_encoder)
     ranked = sorted(
@@ -244,170 +290,263 @@ def classify_document(filename: str, file_bytes: bytes, model: Any, label_encode
         reverse=True,
     )
     top_probability = ranked[0][1]
-    low_confidence = top_probability < REVIEW_THRESHOLD
 
     return {
-        "file_name": filename,
-        "file_bytes": file_bytes,
+        "file_name": record_name,
+        "source_kind": source_kind,
+        "file_bytes": original_bytes,
+        "source_file": source_file,
+        "source_row": source_row,
+        "row_number": row_number,
         "predicted_category": predicted_category,
         "top_probability": top_probability,
         "word_count": word_count,
-        "review_status": "Review required" if low_confidence else "Suggested category",
+        "review_status": "Review recommended" if top_probability < REVIEW_THRESHOLD else "Suggested category",
         "category_scores": {name: score for name, score in ranked},
     }
 
 
+def classify_document(filename: str, file_bytes: bytes, model: Any, label_encoder: Any) -> dict:
+    raw_text = extract_document_text(filename, file_bytes)
+    return classify_text_record(
+        filename,
+        raw_text,
+        model,
+        label_encoder,
+        source_kind="document",
+        original_bytes=file_bytes,
+    )
+
+
+# =============================================================================
+# DOWNLOAD AND RESULT HELPERS
+# =============================================================================
 def safe_path_part(value: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._ -]+", "_", str(value)).strip(" ._")
     return cleaned[:100] or "Unsorted"
 
 
+def spreadsheet_row_csv(item: dict) -> bytes:
+    row_data = dict(item.get("source_row") or {})
+    row_data["Predicted Category"] = item["predicted_category"]
+    row_data["Model Score"] = round(float(item["top_probability"]), 4)
+    row_data["Review Status"] = item["review_status"]
+    return pd.DataFrame([row_data]).to_csv(index=False).encode("utf-8-sig")
+
+
+def item_download(item: dict) -> tuple[bytes, str, str]:
+    if item.get("source_kind") == "spreadsheet_row":
+        content = spreadsheet_row_csv(item)
+        stem = safe_path_part(Path(item["source_file"]).stem)
+        filename = f"{safe_path_part(item['predicted_category'])}_{stem}_row_{item['row_number']}.csv"
+        return content, filename, "text/csv"
+
+    original_name = Path(item["file_name"]).name
+    extension = Path(original_name).suffix.lower().lstrip(".")
+    filename = f"{safe_path_part(item['predicted_category'])}_{safe_path_part(original_name)}"
+    mime = DOCUMENT_MIME_TYPES.get(extension, "application/octet-stream")
+    return item["file_bytes"], filename, mime
+
+
 def make_classified_zip(results: list[dict]) -> bytes:
-    """Package each original document under its predicted category folder."""
     output = io.BytesIO()
     with zipfile.ZipFile(output, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
         for index, item in enumerate(results, start=1):
             category_folder = safe_path_part(item["predicted_category"])
-            original_name = Path(item["file_name"]).name
-            original_name = safe_path_part(original_name)
-            archive_path = f"{category_folder}/{index:03d}_{original_name}"
-            archive.writestr(archive_path, item["file_bytes"])
+            content, download_name, _ = item_download(item)
+            archive_path = f"{category_folder}/{index:03d}_{safe_path_part(download_name)}"
+            archive.writestr(archive_path, content)
     output.seek(0)
     return output.getvalue()
 
 
 def build_results_dataframe(results: list[dict]) -> pd.DataFrame:
-    rows = []
-    for item in results:
-        rows.append(
+    return pd.DataFrame(
+        [
             {
-                "Resume": item["file_name"],
+                "Resume / record": item["file_name"],
                 "Predicted category": item["predicted_category"],
-                "Top class probability": round(item["top_probability"], 4),
+                "Top class probability": round(float(item["top_probability"]), 4),
                 "Extracted words": item["word_count"],
                 "Status": item["review_status"],
             }
-        )
-    return pd.DataFrame(rows)
+            for item in results
+        ]
+    )
 
 
 # =============================================================================
-# LOAD MODEL + SESSION STATE
+# LOAD SAVED MODEL AND SESSION STATE
 # =============================================================================
 try:
     model, label_encoder = load_artifacts()
     available_categories = get_class_names(model, label_encoder)
 except Exception as exc:
     st.error(f"Unable to load the trained classifier: {exc}")
-    st.info(
-        "Place best_resume_classifier.pkl and label_encoder.pkl in the same GitHub folder as app.py."
-    )
+    st.info("Keep best_resume_classifier.pkl and label_encoder.pkl beside app.py in the GitHub repository.")
     st.stop()
 
 if "classification_results" not in st.session_state:
     st.session_state.classification_results = []
 if "last_run_time" not in st.session_state:
     st.session_state.last_run_time = None
+if "nav_section" not in st.session_state:
+    st.session_state.nav_section = "Resume Classification"
 
 
 # =============================================================================
-# SIDEBAR NAVIGATION
+# SIDEBAR NAVIGATION — OPEN BY DEFAULT; BRAND BUTTON RETURNS TO MAIN SCREEN
 # =============================================================================
 with st.sidebar:
+    if st.button("📄  RESUME CLASSIFIER", key="brand_home_button", use_container_width=True):
+        st.session_state.nav_section = "Resume Classification"
+
     st.markdown(
-        """
-        <div class="brand-card">
-            <div style="font-size:2rem">📄</div>
-            <div class="brand-title">Resume Classifier</div>
-            <div class="brand-subtitle">Smart document intelligence</div>
-        </div>
-        """,
+        '<div class="brand-card"><div class="brand-title">Resume Classifier</div>'
+        '<div class="brand-subtitle">Intelligent resume sorting workspace</div></div>',
         unsafe_allow_html=True,
     )
     st.markdown("### Workspace")
     selected_section = st.radio(
-        "Navigate",
+        "Dashboard navigation",
         ["Resume Classification", "Prediction Results", "About the Model"],
-        index=0,
+        key="nav_section",
         label_visibility="collapsed",
     )
     st.divider()
-    st.markdown("**AI ENGINE**")
+    st.markdown("**AI CLASSIFICATION ENGINE**")
     st.markdown("<span style='color:#83e8ff'>●</span> Logistic Regression + TF-IDF", unsafe_allow_html=True)
-    st.markdown("**DOCUMENT INPUT**")
-    st.caption("PDF  ·  DOCX  ·  DOC  ·  TXT")
-    st.markdown("**WORKFLOW**")
-    st.caption("Upload  →  Analyze  →  Classify  →  Download")
+    st.markdown("**DOCUMENT FORMATS**")
+    st.caption("PDF · DOCX · DOC · TXT · CSV · XLSX · XLS")
+    st.markdown("**MODEL CLASSES**")
+    st.caption(f"{len(available_categories)} learned categories")
     st.divider()
-    st.caption("Resume sorting workspace")
+    st.caption("Document intelligence · Resume organization")
 
 
 # =============================================================================
-# SECTION 1 — UPLOAD AND PREDICT IN THE SAME PLACE
+# MAIN SCREEN — UPLOAD, CLASSIFY, VIEW AND DOWNLOAD IN ONE PLACE
 # =============================================================================
 if selected_section == "Resume Classification":
-    st.markdown('<div class="hero-kicker">AI-POWERED DOCUMENT SORTING</div>', unsafe_allow_html=True)
+    st.markdown('<div class="hero-kicker">INTELLIGENT DOCUMENT WORKSPACE</div>', unsafe_allow_html=True)
     st.markdown('<div class="hero-title">📄 Resume Classifier</div>', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="hero-copy">Upload resumes, identify their closest learned category, and download the classified documents in organized folders.</div>',
-        unsafe_allow_html=True,
-    )
-    st.write("")
+    st.markdown('<div class="hero-subtitle">Resume analysis and category sorting</div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">Upload your resume documents</div>', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="muted-copy">Add one resume or a batch of resumes. Supported formats: PDF, DOCX, DOC and TXT.</div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown('<div class="glass-card"><div class="section-title">Upload resume files or a resume dataset</div><div class="muted-copy">Select individual resumes, or a CSV / Excel table where each row contains one resume in a text column.</div></div>', unsafe_allow_html=True)
+
     uploaded_files = st.file_uploader(
-        "Drag and drop resumes here",
-        type=["pdf", "docx", "doc", "txt"],
+        "Choose resume files or CSV / Excel data",
+        type=SUPPORTED_UPLOADS,
         accept_multiple_files=True,
-        key="resume_file_uploader",
-        help="Text-based documents are supported. Scanned image-only PDFs need OCR before classification.",
+        key="resume_file_uploader_v2",
+        help="Supported: PDF, DOCX, DOC, TXT, CSV, XLSX and XLS. For a spreadsheet, each non-empty row in the selected text column is treated as one resume.",
     )
-    metric_a, metric_b = st.columns(2)
-    metric_a.metric("Files selected", len(uploaded_files) if uploaded_files else 0)
-    metric_b.metric("Learned categories", len(available_categories))
-    st.markdown('</div>', unsafe_allow_html=True)
 
-    if len(available_categories) < 2:
-        st.error("The saved model contains fewer than two classes. Please check the model and label encoder files.")
+    spreadsheet_frames: dict[int, pd.DataFrame] = {}
+    spreadsheet_columns: dict[int, str] = {}
+    spreadsheet_load_errors: dict[int, str] = {}
 
+    if uploaded_files:
+        for file_index, uploaded_file in enumerate(uploaded_files):
+            suffix = Path(uploaded_file.name).suffix.lower()
+            if suffix in {".csv", ".xlsx", ".xls"}:
+                try:
+                    table = read_tabular_file(uploaded_file.name, uploaded_file.getvalue())
+                    if table.empty:
+                        raise ValueError("The spreadsheet has no data rows.")
+                    suggested_column = suggest_text_column(table)
+                    spreadsheet_frames[file_index] = table
+                    column_lookup = {str(column): column for column in table.columns}
+                    column_options = list(column_lookup.keys())
+                    default_index = column_options.index(str(suggested_column))
+                    st.markdown(f"**Text column for `{uploaded_file.name}`**")
+                    chosen_column = st.selectbox(
+                        "Select the column containing full resume text",
+                        options=column_options,
+                        index=default_index,
+                        key=f"text_column_{file_index}",
+                    )
+                    spreadsheet_columns[file_index] = column_lookup[chosen_column]
+                    st.caption(f"{len(table):,} rows detected · each non-empty row will be classified separately")
+                except Exception as exc:
+                    spreadsheet_load_errors[file_index] = str(exc)
+                    st.error(f"Could not prepare `{uploaded_file.name}`: {exc}")
+
+        count_col1, count_col2, count_col3 = st.columns(3)
+        count_col1.metric("Files selected", len(uploaded_files))
+        count_col2.metric("Learned categories", len(available_categories))
+        table_rows = sum(len(frame) for frame in spreadsheet_frames.values())
+        count_col3.metric("Spreadsheet rows", table_rows)
+
+    classify_disabled = not uploaded_files or (len(spreadsheet_load_errors) > 0)
     classify_clicked = st.button(
-        "🚀  Analyze & Classify Resumes",
+        "🚀  ANALYZE & CLASSIFY",
         type="primary",
         use_container_width=True,
-        disabled=not uploaded_files,
+        disabled=classify_disabled,
+        key="classify_uploads_button",
     )
 
     if classify_clicked and uploaded_files:
         new_results: list[dict] = []
         errors: list[tuple[str, str]] = []
-        progress = st.progress(0, text="Preparing resume analysis...")
+        total_records = 0
+
+        # Count individual documents plus spreadsheet rows before showing progress.
+        for file_index, uploaded_file in enumerate(uploaded_files):
+            suffix = Path(uploaded_file.name).suffix.lower()
+            if suffix in {".csv", ".xlsx", ".xls"}:
+                total_records += len(spreadsheet_frames.get(file_index, []))
+            else:
+                total_records += 1
+        total_records = max(total_records, 1)
+
+        progress = st.progress(0, text="Preparing classification...")
         status_area = st.empty()
-        total_files = len(uploaded_files)
+        completed = 0
 
-        # A clear processing state is shown while each uploaded document is handled.
-        with st.spinner("Analyzing resume content and generating predictions..."):
-            for index, uploaded_file in enumerate(uploaded_files, start=1):
-                status_area.info(f"🔎 Analyzing: {uploaded_file.name}")
-                try:
-                    result = classify_document(
-                        uploaded_file.name,
-                        uploaded_file.getvalue(),
-                        model,
-                        label_encoder,
-                    )
-                    new_results.append(result)
-                except Exception as exc:
-                    errors.append((uploaded_file.name, str(exc)))
+        with st.spinner("Analyzing resume text and generating category predictions..."):
+            for file_index, uploaded_file in enumerate(uploaded_files):
+                suffix = Path(uploaded_file.name).suffix.lower()
+                file_bytes = uploaded_file.getvalue()
 
-                progress.progress(
-                    index / total_files,
-                    text=f"Analyzed {index} of {total_files} document(s)",
-                )
+                if suffix in {".csv", ".xlsx", ".xls"}:
+                    table = spreadsheet_frames.get(file_index)
+                    text_column = spreadsheet_columns.get(file_index)
+                    if table is None or text_column is None:
+                        errors.append((uploaded_file.name, "Could not identify a resume-text column."))
+                        continue
+
+                    for row_position, (_, row) in enumerate(table.iterrows(), start=1):
+                        status_area.info(f"🔎 Reading {uploaded_file.name} · resume row {row_position}")
+                        try:
+                            raw_resume_text = cell_to_text(row[text_column])
+                            if not raw_resume_text.strip():
+                                raise ValueError("The selected resume-text cell is empty.")
+                            result = classify_text_record(
+                                f"{uploaded_file.name} · row {row_position}",
+                                raw_resume_text,
+                                model,
+                                label_encoder,
+                                source_kind="spreadsheet_row",
+                                source_file=uploaded_file.name,
+                                source_row=row.to_dict(),
+                                row_number=row_position,
+                            )
+                            new_results.append(result)
+                        except Exception as exc:
+                            errors.append((f"{uploaded_file.name} · row {row_position}", str(exc)))
+                        completed += 1
+                        progress.progress(completed / total_records, text=f"Classified {completed} of {total_records} resume record(s)")
+                else:
+                    status_area.info(f"🔎 Analyzing {uploaded_file.name}")
+                    try:
+                        result = classify_document(uploaded_file.name, file_bytes, model, label_encoder)
+                        new_results.append(result)
+                    except Exception as exc:
+                        errors.append((uploaded_file.name, str(exc)))
+                    completed += 1
+                    progress.progress(completed / total_records, text=f"Classified {completed} of {total_records} resume record(s)")
 
         st.session_state.classification_results = new_results
         st.session_state.last_run_time = pd.Timestamp.now().strftime("%d %b %Y, %I:%M:%S %p")
@@ -415,142 +554,114 @@ if selected_section == "Resume Classification":
         progress.empty()
 
         if new_results:
-            st.success(f"✅ Classification complete — {len(new_results)} document(s) processed successfully.")
+            st.success(f"Classification completed: {len(new_results)} resume record(s) processed.")
             st.balloons()
         if errors:
-            st.warning("Some documents could not be classified:")
-            for filename, message in errors:
-                st.write(f"**{filename}:** {message}")
+            with st.expander(f"Items needing attention ({len(errors)})", expanded=True):
+                for filename, message in errors:
+                    st.warning(f"{filename}: {message}")
 
-    # Prediction output is deliberately shown immediately below upload on this page.
+    # Results and downloads remain directly below the upload controls.
     results = st.session_state.classification_results
     if results:
-        st.markdown("## Classification Output")
+        st.markdown("## Classification results")
         summary_df = build_results_dataframe(results)
-        summary_display = summary_df.copy()
-        summary_display["Top class probability"] = summary_display["Top class probability"].map(lambda x: f"{x:.1%}")
-        st.dataframe(summary_display, use_container_width=True, hide_index=True)
+        display_df = summary_df.copy()
+        display_df["Top class probability"] = display_df["Top class probability"].map(lambda score: f"{score:.1%}")
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
 
-        for index, item in enumerate(results, start=1):
+        st.markdown("### Classified files")
+        for result_index, item in enumerate(results, start=1):
             with st.container(border=True):
-                left, middle, right = st.columns([2.3, 1.2, 1.2])
-                left.markdown(f"**{index}. {item['file_name']}**")
-                left.caption(f"Predicted category: {item['predicted_category']}")
-                middle.metric("Model score", f"{item['top_probability']:.1%}")
-                right.metric("Status", item["review_status"])
-                if item["top_probability"] < REVIEW_THRESHOLD:
-                    st.warning("Low model score. Verify this category manually before using the result.")
-                file_ext = Path(item["file_name"]).suffix.lower().lstrip(".") or "txt"
-                st.download_button(
-                    "⬇️ Download this classified resume",
-                    data=item["file_bytes"],
-                    file_name=f"{safe_path_part(item['predicted_category'])}_{safe_path_part(Path(item['file_name']).name)}",
-                    mime={"pdf": "application/pdf", "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "doc": "application/msword", "txt": "text/plain"}.get(file_ext, "application/octet-stream"),
-                    key=f"download_classified_{index}_{safe_path_part(item['file_name'])}",
+                col_file, col_category, col_score, col_download = st.columns([2.2, 1.5, 1, 1.4])
+                col_file.markdown(f"**{result_index}. {item['file_name']}**")
+                col_category.write(item["predicted_category"])
+                col_score.metric("Model score", f"{item['top_probability']:.1%}")
+                download_bytes, download_name, download_mime = item_download(item)
+                col_download.download_button(
+                    "⬇️ Download classified",
+                    data=download_bytes,
+                    file_name=download_name,
+                    mime=download_mime,
+                    key=f"main_download_{result_index}_{safe_path_part(item['file_name'])}",
                     use_container_width=True,
                 )
+                if item["top_probability"] < REVIEW_THRESHOLD:
+                    st.caption("Manual review recommended for this prediction.")
 
-        st.markdown("### Download classified resumes")
-        st.markdown(
-            '<div class="muted-copy">Download all successfully classified original files. The ZIP is organized into folders using each predicted category.</div>',
-            unsafe_allow_html=True,
-        )
+        st.markdown("### Download center")
         zip_data = make_classified_zip(results)
-        dl_col1, dl_col2 = st.columns([1.35, 1])
-        with dl_col1:
+        download_col1, download_col2 = st.columns([1.4, 1])
+        with download_col1:
             st.download_button(
-                "📦  Download all classified resumes (ZIP)",
+                "📦  DOWNLOAD ALL — CATEGORY FOLDERS (ZIP)",
                 data=zip_data,
                 file_name="classified_resumes_by_category.zip",
                 mime="application/zip",
-                key="download_all_classified_zip_main",
                 type="primary",
                 use_container_width=True,
+                key="download_classified_zip_main",
             )
-        with dl_col2:
-            csv_data = summary_df.to_csv(index=False).encode("utf-8-sig")
+        with download_col2:
             st.download_button(
-                "📊  Download classification report (CSV)",
-                data=csv_data,
+                "📊  DOWNLOAD REPORT (CSV)",
+                data=summary_df.to_csv(index=False).encode("utf-8-sig"),
                 file_name="resume_classification_report.csv",
                 mime="text/csv",
-                key="download_classification_csv_main",
                 use_container_width=True,
+                key="download_classification_report_main",
             )
-
-    st.markdown("## How it works")
-    step1, step2, step3 = st.columns(3)
-    with step1:
-        st.markdown('<div class="glass-card"><div class="section-title">1. Upload</div><p class="muted-copy">Choose PDF, Word, or text resumes.</p></div>', unsafe_allow_html=True)
-    with step2:
-        st.markdown('<div class="glass-card"><div class="section-title">2. Analyze</div><p class="muted-copy">Extract resume text and apply matching preprocessing.</p></div>', unsafe_allow_html=True)
-    with step3:
-        st.markdown('<div class="glass-card"><div class="section-title">3. Classify & export</div><p class="muted-copy">View the suggested category and download organized files.</p></div>', unsafe_allow_html=True)
-
-    st.info(
-        "The current model was trained on four categories. It can accept different resume formats, "
-        "but it cannot learn new job categories unless you add labelled examples and retrain it. "
-        "Resumes outside the learned classes may be assigned to the closest known class, so verify predictions."
-    )
 
 
 # =============================================================================
 # SECTION 2 — PREDICTION RESULTS
 # =============================================================================
 elif selected_section == "Prediction Results":
-    st.markdown('<div class="hero-kicker">YOUR CLASSIFICATION HISTORY</div>', unsafe_allow_html=True)
+    st.markdown('<div class="hero-kicker">CLASSIFICATION OVERVIEW</div>', unsafe_allow_html=True)
     st.markdown('<div class="hero-title">Prediction Results</div>', unsafe_allow_html=True)
-    st.markdown('<div class="hero-copy">Review predictions and download the classified resumes.</div>', unsafe_allow_html=True)
-
     results = st.session_state.classification_results
+
     if not results:
-        st.info("No results yet. Open Resume Classification to upload and classify documents.")
+        st.info("Your classification results will appear here after you analyze resumes on the main screen.")
     else:
         summary_df = build_results_dataframe(results)
-        total_files = len(results)
+        total_records = len(results)
         review_count = sum(item["top_probability"] < REVIEW_THRESHOLD for item in results)
-        avg_score = float(np.mean([item["top_probability"] for item in results]))
-
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Classified documents", total_files)
-        m2.metric("Flagged for review", review_count)
-        m3.metric("Average top class score", f"{avg_score:.1%}")
-
+        average_score = float(np.mean([item["top_probability"] for item in results]))
+        metric1, metric2, metric3 = st.columns(3)
+        metric1.metric("Classified records", total_records)
+        metric2.metric("Review recommended", review_count)
+        metric3.metric("Average model score", f"{average_score:.1%}")
         if st.session_state.last_run_time:
             st.caption(f"Latest run: {st.session_state.last_run_time}")
-
         display_df = summary_df.copy()
-        display_df["Top class probability"] = display_df["Top class probability"].map(lambda x: f"{x:.1%}")
+        display_df["Top class probability"] = display_df["Top class probability"].map(lambda score: f"{score:.1%}")
         st.dataframe(display_df, use_container_width=True, hide_index=True)
-
         st.markdown("### Download center")
-        zip_data = make_classified_zip(results)
-        c1, c2 = st.columns(2)
-        with c1:
+        col_zip, col_csv = st.columns(2)
+        with col_zip:
             st.download_button(
-                "📦 Download classified resumes (ZIP)",
-                data=zip_data,
+                "📦 Download category-organized ZIP",
+                data=make_classified_zip(results),
                 file_name="classified_resumes_by_category.zip",
                 mime="application/zip",
-                key="download_all_classified_zip_results",
                 type="primary",
                 use_container_width=True,
+                key="download_results_zip",
             )
-        with c2:
+        with col_csv:
             st.download_button(
-                "📊 Download result report (CSV)",
+                "📊 Download result report",
                 data=summary_df.to_csv(index=False).encode("utf-8-sig"),
                 file_name="resume_classification_report.csv",
                 mime="text/csv",
-                key="download_report_results",
                 use_container_width=True,
+                key="download_results_report",
             )
-
+        distribution = summary_df["Predicted category"].value_counts().rename_axis("Category").to_frame("Documents")
         st.markdown("### Category distribution")
-        category_counts = summary_df["Predicted category"].value_counts().rename_axis("Category").reset_index(name="Documents")
-        st.bar_chart(category_counts.set_index("Category"))
-
-        if st.button("Clear current results", key="clear_results_button"):
+        st.bar_chart(distribution)
+        if st.button("Clear results", key="clear_classification_results"):
             st.session_state.classification_results = []
             st.session_state.last_run_time = None
             st.rerun()
@@ -562,78 +673,67 @@ elif selected_section == "Prediction Results":
 elif selected_section == "About the Model":
     st.markdown('<div class="hero-kicker">MODEL INFORMATION</div>', unsafe_allow_html=True)
     st.markdown('<div class="hero-title">About the Model</div>', unsafe_allow_html=True)
-    st.markdown('<div class="hero-copy">The text-classification engine used to organize uploaded resumes.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="hero-subtitle">Text processing and machine-learning configuration</div>', unsafe_allow_html=True)
 
     info1, info2, info3 = st.columns(3)
     info1.metric("Algorithm", "Logistic Regression")
-    info2.metric("Text features", "TF-IDF")
-    info3.metric("Learned classes", len(available_categories))
+    info2.metric("Text representation", "TF-IDF")
+    info3.metric("Learned categories", len(available_categories))
 
-    st.markdown("### Classification workflow")
+    st.markdown("### Classification pipeline")
     st.code(
-        "Resume upload\n"
-        "    ↓\n"
-        "Text extraction (PDF / DOCX / DOC / TXT)\n"
-        "    ↓\n"
-        "Text normalization and contact-detail masking\n"
-        "    ↓\n"
+        "Resume / spreadsheet row\n"
+        "      ↓\n"
+        "Text extraction or text-column selection\n"
+        "      ↓\n"
+        "Unicode normalization and contact-detail masking\n"
+        "      ↓\n"
         "Saved TF-IDF vectorizer\n"
-        "    ↓\n"
+        "      ↓\n"
         "Logistic Regression classifier\n"
-        "    ↓\n"
-        "Predicted learned category + downloadable file",
+        "      ↓\n"
+        "Predicted category and downloadable output",
         language="text",
     )
 
     st.markdown("### Model configuration")
-    st.json(
-        {
-            "C": 0.1,
-            "class_weight": "balanced",
-            "solver": "lbfgs",
-            "max_iter": 3000,
-            "selection_metric": "Macro F1",
-        }
-    )
+    st.json({"C": 0.1, "class_weight": "balanced", "solver": "lbfgs", "max_iter": 3000, "selection_metric": "Macro F1"})
 
-    st.markdown("### Recorded model evaluation")
-    e1, e2, e3 = st.columns(3)
-    e1.metric("5-fold CV Macro F1", "98.57%")
-    e2.metric("Holdout test Macro F1", "100%")
-    e3.metric("Holdout test accuracy", "100%")
-    st.caption("The holdout set contained 16 documents. These results do not guarantee performance on unseen resumes.")
+    st.markdown("### Recorded evaluation")
+    eval1, eval2, eval3 = st.columns(3)
+    eval1.metric("5-fold CV Macro F1", "98.57%")
+    eval2.metric("Holdout test Macro F1", "100%")
+    eval3.metric("Holdout test accuracy", "100%")
+    st.caption("The holdout test set contained 16 documents; scores are not a guarantee of performance on all future resumes.")
 
     st.markdown("### Categories learned by this model")
-    category_cols = st.columns(2)
-    for index, category in enumerate(available_categories):
-        with category_cols[index % 2]:
+    category_columns = st.columns(2)
+    for category_index, category in enumerate(available_categories):
+        with category_columns[category_index % 2]:
             st.markdown(
-                f'<div class="glass-card"><span style="color:#7ee8ff;font-weight:800">●</span> '
-                f'<span style="color:#ffffff;font-weight:700">{category}</span></div>',
+                f'<div class="glass-card"><span style="color:#7ee8ff;font-weight:900">●</span> '
+                f'<span style="color:#ffffff;font-weight:750">{category}</span></div>',
                 unsafe_allow_html=True,
             )
 
     st.warning(
-        "This saved model currently recognizes only the categories listed above. "
-        "It accepts resumes for many roles and formats, but it cannot reliably assign a new job category "
-        "that was not included in training. To support more resume types, add labelled examples for each "
-        "new category, retrain the model, and replace both saved model files."
+        "The current saved model can assign resumes only to the categories represented in its training data. "
+        "It can accept resumes for many professions and read multiple file formats, but it cannot learn a new "
+        "profession label without labelled examples and retraining. Treat predictions as suggestions and check "
+        "unfamiliar resumes manually."
     )
+    st.markdown("### Supported input formats")
+    st.write("PDF, DOCX, DOC, TXT, CSV, XLSX and XLS. For CSV / Excel, choose the column containing resume text; each row is treated as one resume.")
     st.markdown("### Responsible use")
-    st.write(
-        "Treat every output as a suggested document category. Verify low-scoring or unfamiliar resumes manually. "
-        "This tool is for document organization, not candidate ranking or automated hiring decisions. "
-        "Scanned PDFs require OCR before text extraction."
-    )
+    st.write("Use the output for document organization and routing support. Do not use this classifier to rank candidates or make automated hiring or rejection decisions. Image-only scanned PDFs require OCR before text extraction.")
 
 
 # =============================================================================
 # FOOTER
 # =============================================================================
-st.divider()
 st.markdown(
-    "<div style='text-align:center;color:#b8d5f1;font-size:.85rem;padding:.4rem'>"
-    "📄 Resume Classifier &nbsp;•&nbsp; AI-assisted resume organization"
+    "<div style='text-align:center;color:#c5dcf5;font-size:.85rem;padding:1rem 0 .2rem'>"
+    "📄 Resume Classifier · Intelligent document organization"
     "</div>",
     unsafe_allow_html=True,
 )
