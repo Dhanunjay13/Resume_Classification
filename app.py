@@ -56,41 +56,41 @@ def load_background_css() -> str:
 
 
 background_css = load_background_css()
-st.markdown(
-    f"""
-    <style>
-    .stApp {{
-        {background_css}
-        background-size: cover;
-        background-position: center center;
-        background-attachment: fixed;
-        background-repeat: no-repeat;
-    }}
-    [data-testid="stAppViewContainer"],
-    [data-testid="stMain"],
-    .main {{ background: transparent !important; }}
-    .block-container {{
-        max-width: 1450px;
-        padding-top: 1.5rem;
-        padding-bottom: 3rem;
-    }}
-    [data-testid="stSidebar"] > div:first-child {{
-        background: linear-gradient(180deg, rgba(4, 15, 43, .98), rgba(7, 31, 70, .96));
-        border-right: 1px solid rgba(72, 190, 255, .35);
-    }}
-    [data-testid="stSidebar"] {{ color: #f4f8ff; }}
-    [data-testid="stSidebar"] [data-testid="stRadio"] label {{
-        color: #e6f3ff !important;
-        font-weight: 650;
-    }}
-    [data-testid="stSidebar"] [data-testid="stRadio"] label:hover {{
-        color: #62ddff !important;
-    }}
-    .brand-card {{
-        padding: 1.1rem .9rem;
-        border-radius: 18px;
-        background: linear-gradient(135deg, rgba(0, 174, 255, .22), rgba(95, 86, 255, .22));
-        border: 1px solid rgba(104, 207, 255, .45);
-        margin-bottom: 1rem;
-        box-shadow: 0 8px 28px rgba(0, 0, 0, .20);
-    }}
+# Use a normal triple-quoted template (not an f-string) so CSS braces cannot
+# accidentally be interpreted as Python f-string expressions.
+DASHBOARD_CSS = """
+<style>
+.stApp {
+    __RESUME_BACKGROUND__
+    background-size: cover;
+    background-position: center center;
+    background-attachment: fixed;
+    background-repeat: no-repeat;
+}
+[data-testid="stAppViewContainer"],
+[data-testid="stMain"],
+.main { background: transparent !important; }
+.block-container {
+    max-width: 1450px;
+    padding-top: 1.5rem;
+    padding-bottom: 3rem;
+}
+[data-testid="stSidebar"] > div:first-child {
+    background: linear-gradient(180deg, rgba(4, 15, 43, .98), rgba(7, 31, 70, .96));
+    border-right: 1px solid rgba(72, 190, 255, .35);
+}
+[data-testid="stSidebar"] { color: #f4f8ff; }
+[data-testid="stSidebar"] [data-testid="stRadio"] label {
+    color: #e6f3ff !important;
+    font-weight: 650;
+}
+[data-testid="stSidebar"] [data-testid="stRadio"] label:hover {
+    color: #62ddff !important;
+}
+.brand-card {
+    padding: 1.1rem .9rem;
+    border-radius: 18px;
+    background: linear-gradient(135deg, rgba(0, 174, 255, .22), rgba(95, 86, 255, .22));
+    border: 1px solid rgba(104, 207, 255, .45);
+    margin-bottom: 1rem;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, .20);
