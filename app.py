@@ -1,116 +1,96 @@
-        st.dataframe(display_df, use_container_width=True, hide_index=True)
+from __future__ import annotations
 
-        st.markdown("### Download center")
-        zip_data = make_classified_zip(results)
-        c1, c2 = st.columns(2)
-        with c1:
-            st.download_button(
-                "📦 Download classified resumes (ZIP)",
-                data=zip_data,
-                file_name="classified_resumes_by_category.zip",
-                mime="application/zip",
-                key="download_all_classified_zip_results",
-                type="primary",
-                use_container_width=True,
-            )
-        with c2:
-            st.download_button(
-                "📊 Download result report (CSV)",
-                data=summary_df.to_csv(index=False).encode("utf-8-sig"),
-                file_name="resume_classification_report.csv",
-                mime="text/csv",
-                key="download_report_results",
-                use_container_width=True,
-            )
+import base64
+import io
+import re
+import shutil
+import subprocess
+import tempfile
+import unicodedata
+import zipfile
+from pathlib import Path
+from typing import Any
 
-        st.markdown("### Category distribution")
-        category_counts = summary_df["Predicted category"].value_counts().rename_axis("Category").reset_index(name="Documents")
-        st.bar_chart(category_counts.set_index("Category"))
-
-        if st.button("Clear current results", key="clear_results_button"):
-            st.session_state.classification_results = []
-            st.session_state.last_run_time = None
-            st.rerun()
+import fitz  # PyMuPDF
+import joblib
+import numpy as np
+import pandas as pd
+import streamlit as st
+from docx import Document
 
 
 # =============================================================================
-# SECTION 3 — ABOUT THE MODEL
+# APP SETTINGS
 # =============================================================================
-elif selected_section == "About the Model":
-    st.markdown('<div class="hero-kicker">MODEL INFORMATION</div>', unsafe_allow_html=True)
-    st.markdown('<div class="hero-title">About the Model</div>', unsafe_allow_html=True)
-    st.markdown('<div class="hero-copy">The text-classification engine used to organize uploaded resumes.</div>', unsafe_allow_html=True)
+APP_DIR = Path(__file__).resolve().parent
+MODEL_PATH = APP_DIR / "best_resume_classifier.pkl"
+ENCODER_PATH = APP_DIR / "label_encoder.pkl"
+BACKGROUND_PATH = APP_DIR / "resume_background.png"
+REVIEW_THRESHOLD = 0.70
+MIN_WORD_COUNT = 80
 
-    info1, info2, info3 = st.columns(3)
-    info1.metric("Algorithm", "Logistic Regression")
-    info2.metric("Text features", "TF-IDF")
-    info3.metric("Learned classes", len(available_categories))
-
-    st.markdown("### Classification workflow")
-    st.code(
-        "Resume upload\n"
-        "    ↓\n"
-        "Text extraction (PDF / DOCX / DOC / TXT)\n"
-        "    ↓\n"
-        "Text normalization and contact-detail masking\n"
-        "    ↓\n"
-        "Saved TF-IDF vectorizer\n"
-        "    ↓\n"
-        "Logistic Regression classifier\n"
-        "    ↓\n"
-        "Predicted learned category + downloadable file",
-        language="text",
-    )
-
-    st.markdown("### Model configuration")
-    st.json(
-        {
-            "C": 0.1,
-            "class_weight": "balanced",
-            "solver": "lbfgs",
-            "max_iter": 3000,
-            "selection_metric": "Macro F1",
-        }
-    )
-
-    st.markdown("### Recorded model evaluation")
-    e1, e2, e3 = st.columns(3)
-    e1.metric("5-fold CV Macro F1", "98.57%")
-    e2.metric("Holdout test Macro F1", "100%")
-    e3.metric("Holdout test accuracy", "100%")
-    st.caption("The holdout set contained 16 documents. These results do not guarantee performance on unseen resumes.")
-
-    st.markdown("### Categories learned by this model")
-    category_cols = st.columns(2)
-    for index, category in enumerate(available_categories):
-        with category_cols[index % 2]:
-            st.markdown(
-                f'<div class="glass-card"><span style="color:#7ee8ff;font-weight:800">●</span> '
-                f'<span style="color:#ffffff;font-weight:700">{category}</span></div>',
-                unsafe_allow_html=True,
-            )
-
-    st.warning(
-        "This saved model currently recognizes only the categories listed above. "
-        "It accepts resumes for many roles and formats, but it cannot reliably assign a new job category "
-        "that was not included in training. To support more resume types, add labelled examples for each "
-        "new category, retrain the model, and replace both saved model files."
-    )
-    st.markdown("### Responsible use")
-    st.write(
-        "Treat every output as a suggested document category. Verify low-scoring or unfamiliar resumes manually. "
-        "This tool is for document organization, not candidate ranking or automated hiring decisions. "
-        "Scanned PDFs require OCR before text extraction."
-    )
-
-
-# =============================================================================
-# FOOTER
-# =============================================================================
-st.divider()
-st.markdown(
-    "<div style='text-align:center;color:#b8d5f1;font-size:.85rem;padding:.4rem'>"
-    "📄 Resume Classifier &nbsp;•&nbsp; AI-assisted resume organization"
-    "</div>",
-    unsafe_allow_html=True,
+st.set_page_config(
+    page_title="Resume Classifier",
+    page_icon="📄",
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
+
+
+# =============================================================================
+# BACKGROUND + DASHBOARD STYLING
+# Keep resume_background.png in the same GitHub folder as app.py.
+# =============================================================================
+def load_background_css() -> str:
+    if BACKGROUND_PATH.exists():
+        encoded = base64.b64encode(BACKGROUND_PATH.read_bytes()).decode("ascii")
+        background_layer = (
+            "linear-gradient(105deg, rgba(2, 9, 30, .88), "
+            "rgba(3, 15, 45, .82)), "
+            f"url('data:image/png;base64,{encoded}')"
+        )
+        return f"background-image: {background_layer};"
+
+    # Gradient fallback if the image has not yet been uploaded to GitHub.
+    return "background: linear-gradient(135deg, #06132f 0%, #102c62 55%, #07142f 100%);"
+
+
+background_css = load_background_css()
+st.markdown(
+    f"""
+    <style>
+    .stApp {{
+        {background_css}
+        background-size: cover;
+        background-position: center center;
+        background-attachment: fixed;
+        background-repeat: no-repeat;
+    }}
+    [data-testid="stAppViewContainer"],
+    [data-testid="stMain"],
+    .main {{ background: transparent !important; }}
+    .block-container {{
+        max-width: 1450px;
+        padding-top: 1.5rem;
+        padding-bottom: 3rem;
+    }}
+    [data-testid="stSidebar"] > div:first-child {{
+        background: linear-gradient(180deg, rgba(4, 15, 43, .98), rgba(7, 31, 70, .96));
+        border-right: 1px solid rgba(72, 190, 255, .35);
+    }}
+    [data-testid="stSidebar"] {{ color: #f4f8ff; }}
+    [data-testid="stSidebar"] [data-testid="stRadio"] label {{
+        color: #e6f3ff !important;
+        font-weight: 650;
+    }}
+    [data-testid="stSidebar"] [data-testid="stRadio"] label:hover {{
+        color: #62ddff !important;
+    }}
+    .brand-card {{
+        padding: 1.1rem .9rem;
+        border-radius: 18px;
+        background: linear-gradient(135deg, rgba(0, 174, 255, .22), rgba(95, 86, 255, .22));
+        border: 1px solid rgba(104, 207, 255, .45);
+        margin-bottom: 1rem;
+        box-shadow: 0 8px 28px rgba(0, 0, 0, .20);
+    }}
